@@ -13,9 +13,9 @@ set -u
 ## 2. Missing ACCEPT in FORWARD CHAIN on Worker node
 
 
-KUBERNETES_PUBLIC_ADDRESS=10.0.0.1
+KUBERNETES_PUBLIC_ADDRESS=87.233.46.250
 ETCD_IP_ADDRESS=127.0.0.1
-WORKERS="worker01 worker02"
+WORKERS="test2-worker01 test2-worker02"
 
 if [[ $1 == '--force' ]]; then
     test -e /etc/kubernetes/ssl && rm -rf /etc/kubernetes/ssl

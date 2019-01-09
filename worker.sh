@@ -27,7 +27,8 @@ fi
 mkdir -p /etc/kubernetes/ssl
 
 
-HOSTNAME=`hostname`
+HOSTNAME=
+POD_CIDR=
 
 
 

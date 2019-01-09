@@ -110,12 +110,12 @@ def main():
     # generate admin user
     pki.gen_cert('admin', o="system:masters", ou="Kubernetes Admin")
 
-    for instance in nodes:
+    for node in nodes:
         # for cert auth
-        pki.gen_cert(f'{instance}', cn=f"system:node:{instance}", o="system:nodes", ou="Kubernetes Nodes")
+        pki.gen_cert(f'{node}', cn=f"system:node:{node}", o="system:nodes", ou="Kubernetes Nodes")
 
         # for serving on https
-        pki.gen_cert(f'https-{instance}', cn=f"{instance}", ou=f"Kubernetes Node {instance}")
+        pki.gen_cert(f'https-{node}', cn=f"{node}", ou=f"Kubernetes Node {node}")
 
     pki.gen_cert('kube-controller-manager', cn="system:kube-controller-manager", o="system:kube-controller-manager", ou="Kubernetes Controller")
 
