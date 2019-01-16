@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import base64
+import yaml
 import argparse
 
 
@@ -16,7 +17,7 @@ class KubeConfig:
         ca_path = os.path.join(workdir, 'ca.pem')
 
         self.workdir = workdir
-        self.apiserver = apiserver
+        self.apiserver = apiserver[0]
         self.ca = read_base64(ca_path)
 
     def save_config(self, name, cert_name=None, username='user'):
@@ -55,10 +56,11 @@ class KubeConfig:
                     'user': username,
                 },
             }],
+            'current-context': 'default',
 
         }
         with open(config_path, 'w') as f:
-            json.dump(config, f)
+            yaml.safe_dump(config, f)
 
 
 def main():

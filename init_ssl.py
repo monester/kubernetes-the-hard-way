@@ -17,7 +17,6 @@ PKI_CONFIG = {
 }
 
 
-
 class PKI:
     def __init__(self, workdir):
         self.workdir = workdir

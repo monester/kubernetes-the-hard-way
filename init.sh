@@ -13,7 +13,7 @@ set -u
 ## 2. Missing ACCEPT in FORWARD CHAIN on Worker node
 
 
-KUBERNETES_PUBLIC_ADDRESS=87.233.46.250
+KUBERNETES_PUBLIC_ADDRESS=127.0.0.1
 ETCD_IP_ADDRESS=127.0.0.1
 WORKERS="test2-worker01 test2-worker02"
 
@@ -23,7 +23,7 @@ if [[ $1 == '--force' ]]; then
 fi
 
 ./init_ssl.py --workdir=/etc/kubernetes/ssl --apiserver="${KUBERNETES_PUBLIC_ADDRESS}" $WORKERS
-./init_kubeconfig.py --workdir=/etc/kubernetes/ssl --apiserver="${KUBERNETES_PUBLIC_ADDRESS}" $WORKERS
+./init_kubeconfig.py --workdir=/etc/kubernetes/ssl --apiserver="https://${KUBERNETES_PUBLIC_ADDRESS}:6443" $WORKERS
 
 ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64)
 
