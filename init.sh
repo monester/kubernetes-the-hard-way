@@ -157,7 +157,6 @@ for WORKER in "${WORKERS[@]}"; do
     ssh $WORKER "WORKER=${WORKER} POD_CIDR=${POD_CIDR} bash worker.sh" || true
 done
 
-
 cat <<EOF | kubectl apply -f -
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
@@ -195,8 +194,6 @@ subjects:
     kind: User
     name: kubernetes
 EOF
-
-
 
 cat <<EOF | kubectl apply -f-
 apiVersion: policy/v1beta1

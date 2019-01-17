@@ -5,10 +5,12 @@ import subprocess
 
 
 class ControlPlane:
-    def __init__(self):
+    def __init__(self, apiserver, workdir):
         self.etcd_servers = '127.0.0.1',
-        self.master = '127.0.0.1'
+        self.master = apiserver
         self.hyperkube = 'k8s.gcr.io/hyperkube:v1.13.1'
+        self.workdir = workdir
+
 
     def etcd(self, index=0):
         image = 'quay.io/coreos/etcd:v3.2'
@@ -16,18 +18,18 @@ class ControlPlane:
         env = [
             'ETCDCTL_API=3',
             f'ETCDCTL_ENDPOINTS=https://{ip}:2379',
-            'ETCDCTL_CACERT=/etc/kubernetes/ssl/ca.pem',
-            'ETCDCTL_CERT=/etc/kubernetes/ssl/kubernetes.pem',
-            'ETCDCTL_KEY=/etc/kubernetes/ssl/kubernetes-key.pem',
+            f'ETCDCTL_CACERT={self.workdir}/ca.pem',
+            f'ETCDCTL_CERT={self.workdir}/kubernetes.pem',
+            f'ETCDCTL_KEY={self.workdir}/kubernetes-key.pem',
         ]
         command = [
             'etcd',
             '--name=etcd1',
             f'--advertise-client-urls=https://{ip}:2379',
             f'--listen-client-urls=https://{ip}:2379',
-            '--trusted-ca-file=/etc/kubernetes/ssl/ca.pem',
-            '--cert-file=/etc/kubernetes/ssl/kubernetes.pem',
-            '--key-file=/etc/kubernetes/ssl/kubernetes-key.pem',
+            f'--trusted-ca-file={self.workdir}/ca.pem',
+            f'--cert-file={self.workdir}/kubernetes.pem',
+            f'--key-file={self.workdir}/kubernetes-key.pem',
             '--client-cert-auth',
         ]
         return image, env, command
@@ -40,6 +42,7 @@ class ControlPlane:
         image  = self.hyperkube
         command = [
             'kube-apiserver',
+
             # we should allow priviledged containers
             '--allow-privileged=true',
 
@@ -50,28 +53,40 @@ class ControlPlane:
             '--bind-address=0.0.0.0',
 
             # allow certificates with this root CA
-            '--client-ca-file=/etc/kubernetes/ssl/ca.pem',
+            f'--client-ca-file={self.workdir}/ca.pem',
 
             # Admission plugins to use (TODO: check what is required)
-            '--enable-admission-plugins=NodeRestriction',
+            '--enable-admission-plugins=%s' % ','.join([
+                # default admission plugins
+                'NamespaceLifecycle',
+                'LimitRanger',
+                'ServiceAccount',
+                'Priority',
+                'DefaultTolerationSeconds',
+                'DefaultStorageClass',
+                'PersistentVolumeClaimResize',
+                'MutatingAdmissionWebhook',
+                'ValidatingAdmissionWebhook',
+                'ResourceQuota',
+            ]),
 
             # connection to etcd info
-            '--etcd-cafile=/etc/kubernetes/ssl/ca.pem',
-            '--etcd-certfile=/etc/kubernetes/ssl/kubernetes.pem',
-            '--etcd-keyfile=/etc/kubernetes/ssl/kubernetes-key.pem',
+            f'--etcd-cafile={self.workdir}/ca.pem',
+            f'--etcd-certfile={self.workdir}/kubernetes.pem',
+            f'--etcd-keyfile={self.workdir}/kubernetes-key.pem',
             f'--etcd-servers={etcd_servers}',
 
             # '--encryption-provider-config=VeRyBiGSeCrEt',
 
             # kubelet configuration
-            '--kubelet-certificate-authority=/etc/kubernetes/ssl/ca.pem',
-            '--kubelet-client-certificate=/etc/kubernetes/ssl/kubernetes.pem',
-            '--kubelet-client-key=/etc/kubernetes/ssl/kubernetes-key.pem',
+            f'--kubelet-certificate-authority={self.workdir}/ca.pem',
+            f'--kubelet-client-certificate={self.workdir}/kubernetes.pem',
+            f'--kubelet-client-key={self.workdir}/kubernetes-key.pem',
             '--kubelet-https=true',
 
-            '--service-account-key-file=/etc/kubernetes/ssl/service-account-key.pem',
-            '--tls-cert-file=/etc/kubernetes/ssl/kubernetes.pem',
-            '--tls-private-key-file=/etc/kubernetes/ssl/kubernetes-key.pem',
+            f'--service-account-key-file={self.workdir}/service-account-key.pem',
+            f'--tls-cert-file={self.workdir}/kubernetes.pem',
+            f'--tls-private-key-file={self.workdir}/kubernetes-key.pem',
             '--v 2',
         ]
         return image, env, command
@@ -81,16 +96,19 @@ class ControlPlane:
         image  = self.hyperkube
         command = [
             'kube-controller-manager',
-            '--kubeconfig=/etc/kubernetes/ssl/kube-controller-manager.kubeconfig',
-            '--master=https://127.0.0.1:6443',
+            f'--kubeconfig={self.workdir}/kube-controller-manager.kubeconfig',
             '--address=0.0.0.0',
+
+            # whole subnet for all pods (kubelet --pod-cidr should be part of this subnet)
             '--cluster-cidr=10.200.0.0/16',
             '--cluster-name=kubernetes',
+
             '--leader-elect=true',
-            '--cluster-signing-cert-file=/etc/kubernetes/ssl/ca.pem',
-            '--cluster-signing-key-file=/etc/kubernetes/ssl/ca-key.pem',
-            '--client-ca-file=/etc/kubernetes/ssl/ca.pem',
-            '--service-account-private-key-file=/etc/kubernetes/ssl/service-account-key.pem',
+
+            # '--cluster-signing-cert-file={self.workdir}/ca.pem',
+            # '--cluster-signing-key-file={self.workdir}/ca-key.pem',
+            # '--client-ca-file={self.workdir}/ca.pem',
+            f'--service-account-private-key-file={self.workdir}/service-account-key.pem',
             '--use-service-account-credentials=true',
             '--v 2',
         ]
@@ -101,11 +119,8 @@ class ControlPlane:
         image  = self.hyperkube
         command = [
             'kube-scheduler',
-            # '--master=https://127.0.0.1:6443',
-            # '--client-ca-file=/etc/kubernetes/ssl/ca.pem',
-            # '--tls-cert-file=/etc/kubernetes/ssl/kube-scheduler.pem',
-            # '--tls-private-key-file=/etc/kubernetes/ssl/kube-scheduler-key.pem',
-            '--kubeconfig=/etc/kubernetes/ssl/kube-scheduler.kubeconfig',
+            # master connection details
+            f'--kubeconfig={self.workdir}/kube-scheduler.kubeconfig',
             '--leader-elect=true',
             '--v 2',
         ]
@@ -174,12 +189,12 @@ def main():
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--run', action='store_true', default=False)
     parser.add_argument('--service', default='all')
-    # parser.add_argument('--workdir', help='Path to PKI folder', default='/etc/kubernetes/ssl', metavar='workdir', required=False)
-    # parser.add_argument('--apiserver', help='IP address of API server of worker node', metavar='ip', required=True, action='append')
-    # parser.add_argument('node', help='hostname of worker node', metavar='worker', nargs='+')
+    parser.add_argument('--workdir', help='Path to PKI folder', default='/etc/kubernetes/ssl', metavar='workdir', required=False)
+    parser.add_argument('--apiserver', help='IP address of API server of worker node', metavar='ip', default='127.0.0.1')
+    parser.add_argument('node', help='hostname of worker node', metavar='worker', nargs='*')
     args = parser.parse_args()
 
-    cp = ControlPlane()
+    cp = ControlPlane(args.apiserver, args.workdir)
 
     if args.docker:
         wrapper = docker
