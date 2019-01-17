@@ -6,7 +6,7 @@ import subprocess
 
 class ControlPlane:
     def __init__(self, apiserver, workdir):
-        self.etcd_servers = '127.0.0.1',
+        self.etcd_servers = '127.0.0.1'
         self.master = apiserver
         self.hyperkube = 'k8s.gcr.io/hyperkube:v1.13.1'
         self.workdir = workdir
@@ -35,9 +35,7 @@ class ControlPlane:
         return image, env, command
 
     def kube_apiserver(self):
-        addresses = self.etcd_servers
-
-        etcd_servers = ','.join([f'https://{ip}:2379' for ip in addresses])
+        etcd_servers = f'https://{self.etcd_servers}:2379'
         env = []
         image  = self.hyperkube
         command = [
