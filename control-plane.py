@@ -1,38 +1,54 @@
 #!/usr/bin/env python3
 
+from textwrap import dedent
+import re
 import argparse
 import subprocess
+import os
+import base64
+import yaml
+
+
+class Etcd:
+    def __init__(self, name='etcd', advertise='127.0.0.1', listen='0.0.0.0', ca=None, cert=None):
+        self.ca = ca
+        self.cert = cert
+        self.name = name
+
+        proto = 'https' if cert else 'http'
+
+        self.listen_client = f'{proto}://{listen}:2379'
+        self.advertise = f'{proto}://{advertise}:2379'
+
+    def cmd(self):
+        image = 'quay.io/coreos/etcd:v3.2'
+        env = [
+            'ETCDCTL_API=3',
+            f'ETCDCTL_ENDPOINTS={self.listen_client}',
+            f'ETCDCTL_CACERT={self.ca.pem}',
+            f'ETCDCTL_CERT={self.cert.pem}',
+            f'ETCDCTL_KEY={self.cert.key}',
+        ]
+        command = [
+            'etcd',
+            '--client-cert-auth',
+            f'--name={self.name}',
+            f'--advertise-client-urls={self.advertise}',
+            f'--listen-client-urls={self.listen_client}',
+            f'--trusted-ca-file={self.ca.pem}',
+            f'--cert-file={self.cert.pem}',
+            f'--key-file={self.cert.key}',
+        ]
+        return image, env, command
 
 
 class ControlPlane:
-    def __init__(self, apiserver, workdir):
+    def __init__(self, apiserver, workdir, certs):
         self.etcd_servers = '127.0.0.1'
         self.master = apiserver
         self.hyperkube = 'k8s.gcr.io/hyperkube:v1.13.1'
         self.workdir = workdir
-
-
-    def etcd(self, index=0):
-        image = 'quay.io/coreos/etcd:v3.2'
-        ip = self.etcd_servers
-        env = [
-            'ETCDCTL_API=3',
-            f'ETCDCTL_ENDPOINTS=https://{ip}:2379',
-            f'ETCDCTL_CACERT={self.workdir}/ca.pem',
-            f'ETCDCTL_CERT={self.workdir}/kubernetes.pem',
-            f'ETCDCTL_KEY={self.workdir}/kubernetes-key.pem',
-        ]
-        command = [
-            'etcd',
-            '--name=etcd1',
-            f'--advertise-client-urls=https://{ip}:2379',
-            f'--listen-client-urls=https://{ip}:2379',
-            f'--trusted-ca-file={self.workdir}/ca.pem',
-            f'--cert-file={self.workdir}/kubernetes.pem',
-            f'--key-file={self.workdir}/kubernetes-key.pem',
-            '--client-cert-auth',
-        ]
-        return image, env, command
+        self.certs = certs
 
     def kube_apiserver(self):
         etcd_servers = f'https://{self.etcd_servers}:2379'
@@ -51,7 +67,7 @@ class ControlPlane:
             '--bind-address=0.0.0.0',
 
             # allow certificates with this root CA
-            f'--client-ca-file={self.workdir}/ca.pem',
+            f'--client-ca-file={self.certs.ca.pem}',
 
             # Admission plugins to use (TODO: check what is required)
             '--enable-admission-plugins=%s' % ','.join([
@@ -69,9 +85,9 @@ class ControlPlane:
             ]),
 
             # connection to etcd info
-            f'--etcd-cafile={self.workdir}/ca.pem',
-            f'--etcd-certfile={self.workdir}/kubernetes.pem',
-            f'--etcd-keyfile={self.workdir}/kubernetes-key.pem',
+            f'--etcd-cafile={self.certs.ca.pem}',
+            f'--etcd-certfile={self.certs["kubernetes"].pem}',
+            f'--etcd-keyfile={self.certs["kubernetes"].key}',
             f'--etcd-servers={etcd_servers}',
 
             # '--encryption-provider-config=VeRyBiGSeCrEt',
@@ -144,8 +160,27 @@ def docker(service, image, env, command, debug, run):
             pass
         subprocess.check_call(line, shell=True)
 
+def publish_secrets(certs):
+    """Put certificates to the secrets"""
+    config = dedent('''\
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: mysecret
+        type: Opaque
+    ''')
+
+    data = {}
+    for cert in certs._certs.values():
+        data[os.path.basename(cert.pem)] = base64.b64encode(open(cert.pem, 'rb').read()).decode('utf-8')
+        data[os.path.basename(cert.key)] = base64.b64encode(open(cert.key, 'rb').read()).decode('utf-8')
+
+    config += yaml.safe_dump({'data': data}, indent=2, default_flow_style=False)
+    print(config)
+
+
+
 def kube(name, image, env, command, debug, run):
-    from textwrap import dedent
     config = dedent(f'''\
         ---
         apiVersion: extensions/v1
@@ -192,7 +227,11 @@ def main():
     parser.add_argument('node', help='hostname of worker node', metavar='worker', nargs='*')
     args = parser.parse_args()
 
-    cp = ControlPlane(args.apiserver, args.workdir)
+    certs = Certs(args.workdir)
+    kubeconfigs = KubeConfigs(args.workdir)
+
+    cp = ControlPlane(args.apiserver, args.workdir, certs)
+    etcd = Etcd(ca=certs.ca, cert=certs['kubernetes'])
 
     if args.docker:
         wrapper = docker
@@ -203,9 +242,11 @@ def main():
     debug = args.debug
     run = args.run
 
-    print(run, debug)
+    if args.kube and not args.docker:
+        publish_secrets(certs)
+
     if service in ['etcd', 'all']:
-        wrapper('etcd', *cp.etcd(), debug, run)
+        wrapper('etcd', *etcd.cmd(), debug, run)
 
     if service in ['apiserver', 'all']:
         wrapper('kube-apiserver', *cp.kube_apiserver(), debug, run)
