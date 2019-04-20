@@ -27,16 +27,10 @@ def main():
     kc.save_config('kube-controller-manager', username='system:kube-controller-manager')
     kc.save_config('kube-scheduler', username='system:kube-scheduler')
 
-
     for node in nodes:
         username = f'system:node:{node}'
         kc.save_config(node, username=username)
 
 
-
 if __name__ == '__main__':
-    try:
-        main()
-    except Exception as e:
-        print(e, file=sys.stderr)
-        exit(1)
+    main()

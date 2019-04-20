@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import sys
-from subprocess import Popen, PIPE
-import json
 import os
 
 from hardway.pki import PKI

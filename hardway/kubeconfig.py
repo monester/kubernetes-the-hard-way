@@ -1,5 +1,11 @@
 import os
 import re
+import yaml
+import base64
+
+
+def read_base64(path):
+    return base64.b64encode(open(path, 'rb').read()).decode('utf-8')
 
 
 class KubeConfig:
