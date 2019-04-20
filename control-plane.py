@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
 from textwrap import dedent
-import re
 import argparse
 import subprocess
 import os
 import base64
 import yaml
 
+from hardway.pki import PKI
+# from hardway.kubeconfig import KubeConfigs
 
 class Etcd:
     def __init__(self, name='etcd', advertise='127.0.0.1', listen='0.0.0.0', ca=None, cert=None):
@@ -25,9 +26,9 @@ class Etcd:
         env = [
             'ETCDCTL_API=3',
             f'ETCDCTL_ENDPOINTS={self.listen_client}',
-            f'ETCDCTL_CACERT={self.ca.pem}',
-            f'ETCDCTL_CERT={self.cert.pem}',
-            f'ETCDCTL_KEY={self.cert.key}',
+            f'ETCDCTL_CACERT={self.ca.pem_path}',
+            f'ETCDCTL_CERT={self.cert.pem_path}',
+            f'ETCDCTL_KEY={self.cert.key_path}',
         ]
         command = [
             'etcd',
@@ -35,9 +36,9 @@ class Etcd:
             f'--name={self.name}',
             f'--advertise-client-urls={self.advertise}',
             f'--listen-client-urls={self.listen_client}',
-            f'--trusted-ca-file={self.ca.pem}',
-            f'--cert-file={self.cert.pem}',
-            f'--key-file={self.cert.key}',
+            f'--trusted-ca-file={self.ca.pem_path}',
+            f'--cert-file={self.cert.pem_path}',
+            f'--key-file={self.cert.key_path}',
         ]
         return image, env, command
 
@@ -53,7 +54,7 @@ class ControlPlane:
     def kube_apiserver(self):
         etcd_servers = f'https://{self.etcd_servers}:2379'
         env = []
-        image  = self.hyperkube
+        image = self.hyperkube
         command = [
             'kube-apiserver',
 
@@ -67,7 +68,7 @@ class ControlPlane:
             '--bind-address=0.0.0.0',
 
             # allow certificates with this root CA
-            f'--client-ca-file={self.certs.ca.pem}',
+            f'--client-ca-file={self.certs.ca.pem_path}',
 
             # Admission plugins to use (TODO: check what is required)
             '--enable-admission-plugins=%s' % ','.join([
@@ -85,9 +86,9 @@ class ControlPlane:
             ]),
 
             # connection to etcd info
-            f'--etcd-cafile={self.certs.ca.pem}',
-            f'--etcd-certfile={self.certs["kubernetes"].pem}',
-            f'--etcd-keyfile={self.certs["kubernetes"].key}',
+            f'--etcd-cafile={self.certs.ca.pem_path}',
+            f'--etcd-certfile={self.certs["kubernetes"].pem_path}',
+            f'--etcd-keyfile={self.certs["kubernetes"].key_path}',
             f'--etcd-servers={etcd_servers}',
 
             # '--encryption-provider-config=VeRyBiGSeCrEt',
@@ -107,7 +108,7 @@ class ControlPlane:
 
     def kube_controller_manager(self):
         env = []
-        image  = self.hyperkube
+        image = self.hyperkube
         command = [
             'kube-controller-manager',
             f'--kubeconfig={self.workdir}/kube-controller-manager.kubeconfig',
@@ -130,7 +131,7 @@ class ControlPlane:
 
     def kube_scheduller(self):
         env = []
-        image  = self.hyperkube
+        image = self.hyperkube
         command = [
             'kube-scheduler',
             # master connection details
@@ -140,7 +141,8 @@ class ControlPlane:
         ]
         return image, env, command
 
-def docker(service, image, env, command, debug, run):
+
+def docker(service, image, env, command, workdir, debug, run):
     if debug:
         run_str = '# {service} #\ndocker run --rm --network=host --name {service} -ti {env} {volumes} {image} \\\n{command}\n\n'
     else:
@@ -148,7 +150,7 @@ def docker(service, image, env, command, debug, run):
     line = run_str.format(
         service=service,
         env=' '.join([f'-e{i}' for i in env]),
-        volumes='-v/etc/kubernetes/ssl:/etc/kubernetes/ssl',
+        volumes=f'-v{workdir}:{workdir}',
         image=image,
         command=' \\\n'.join(command),
     )
@@ -159,6 +161,7 @@ def docker(service, image, env, command, debug, run):
         except subprocess.CalledProcessError:
             pass
         subprocess.check_call(line, shell=True)
+
 
 def publish_secrets(certs):
     """Put certificates to the secrets"""
@@ -179,83 +182,85 @@ def publish_secrets(certs):
     print(config)
 
 
-
-def kube(name, image, env, command, debug, run):
-    config = dedent(f'''\
-        ---
-        apiVersion: extensions/v1
-        kind: StatefulSet
-        metadata:
-          labels:
-            app: {name}
-          name: {name}
-        spec:
-          selector:
-            matchLabels:
-              app: {name}
-          strategy:
-            rollingUpdate:
-              maxUnavailable: 0
-            type: RollingUpdate
-          template:
-            metadata:
-              labels:
-                app: {name}
-            spec:
-              initContainers:
-              - name: certficate-checker
-                image: python:3.7
-                env:
-                - APP_NAME: {name}
-              containers:
-              - image: {image}
-                name {name}
-    ''')
-    print(config)
-
+# def kube(name, image, env, command, debug, run):
+#     config = dedent(f'''\
+#         ---
+#         apiVersion: extensions/v1
+#         kind: StatefulSet
+#         metadata:
+#           labels:
+#             app: {name}
+#           name: {name}
+#         spec:
+#           selector:
+#             matchLabels:
+#               app: {name}
+#           strategy:
+#             rollingUpdate:
+#               maxUnavailable: 0
+#             type: RollingUpdate
+#           template:
+#             metadata:
+#               labels:
+#                 app: {name}
+#             spec:
+#               initContainers:
+#               - name: certficate-checker
+#                 image: python:3.7
+#                 env:
+#                 - APP_NAME: {name}
+#               containers:
+#               - image: {image}
+#                 name {name}
+#     ''')
+#     print(config)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--docker', action='store_true', default=False)
-    parser.add_argument('--kube', action='store_true', default=True)
+    parser.add_argument('--docker', action='store_true', default=True)
+    parser.add_argument('--kube', action='store_true', default=False)
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--run', action='store_true', default=False)
     parser.add_argument('--service', default='all')
-    parser.add_argument('--workdir', help='Path to PKI folder', default='/etc/kubernetes/ssl', metavar='workdir', required=False)
-    parser.add_argument('--apiserver', help='IP address of API server of worker node', metavar='ip', default='127.0.0.1')
+    parser.add_argument('--workdir', help='Path to PKI folder', default='/etc/kubernetes/ssl', metavar='workdir',
+                        required=False)
+    parser.add_argument('--apiserver', help='IP address of API server of worker node', metavar='ip',
+                        default='127.0.0.1')
     parser.add_argument('node', help='hostname of worker node', metavar='worker', nargs='*')
     args = parser.parse_args()
 
-    certs = Certs(args.workdir)
-    kubeconfigs = KubeConfigs(args.workdir)
+    certs = PKI(args.workdir)
+    # kube_configs = KubeConfigs(args.workdir)
 
     cp = ControlPlane(args.apiserver, args.workdir, certs)
     etcd = Etcd(ca=certs.ca, cert=certs['kubernetes'])
 
+    from functools import partial
+
     if args.docker:
-        wrapper = docker
+        wrapper = partial(docker, workdir=args.workdir, debug=args.debug, run=args.run)
     elif args.kube:
-        wrapper = kube
+        wrapper = None
 
     service = args.service
     debug = args.debug
     run = args.run
 
-    if args.kube and not args.docker:
-        publish_secrets(certs)
+    # if args.kube and not args.docker:
+    #     publish_secrets(certs)
 
     if service in ['etcd', 'all']:
-        wrapper('etcd', *etcd.cmd(), debug, run)
+        wrapper('etcd', *etcd.cmd())
 
     if service in ['apiserver', 'all']:
-        wrapper('kube-apiserver', *cp.kube_apiserver(), debug, run)
+        wrapper('kube-apiserver', *cp.kube_apiserver())
 
     if service in ['scheduler', 'all']:
-        wrapper('kube-scheduler', *cp.kube_scheduller(), debug, run)
+        wrapper('kube-scheduler', *cp.kube_scheduller())
 
     if service in ['controller', 'all']:
-        wrapper('kube-controller-manager', *cp.kube_controller_manager(), debug, run)
+        wrapper('kube-controller-manager', *cp.kube_controller_manager())
 
 
 if __name__ == '__main__':

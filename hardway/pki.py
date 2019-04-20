@@ -100,12 +100,11 @@ class PKI:
 
             cert = Cert(workdir=self.workdir, name=cert_name, **json.loads(output))
 
-        self.certs[cert_name] = cert
         return cert
 
     def __getitem__(self, item):
         try:
-            self.certs[item]
+            return self.certs[item]
         except KeyError:
             self.certs[item] = self.gen_cert(item)
             return self.certs[item]

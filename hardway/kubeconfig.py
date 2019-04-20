@@ -35,7 +35,7 @@ class KubeConfig:
                 'name': 'kubernetes',
                 'cluster': {
                     'certificate-authority-data': self.ca,
-                    'server': self.apiserver,
+                    'server': f'https://{self.apiserver}:6443',
                 },
             }],
             'users': [{
@@ -60,7 +60,7 @@ class KubeConfig:
 
 
 class KubeConfigs:
-    def __init__(self, workdir, names):
+    def __init__(self, workdir):
         self.workdir = workdir
         self.kubeconfigs = {}
         self.load()
