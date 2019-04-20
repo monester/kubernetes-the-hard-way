@@ -8,6 +8,7 @@ def read_base64(filename):
 
 class Cert:
     def __init__(self, workdir, cert, pki):
+        self.name = cert
         self.pem = os.path.join(wordir, f'{cert}.pem')
         self.key = os.path.join(wordir, f'{cert}-key.pem')
         self.workdir = workdir
@@ -15,9 +16,8 @@ class Cert:
         if os.path.exists(self.pem) and os.path.exists(self.key):
             self.pem_content = read_base64(self.pem)
             self.key_content = read_base64(self.key)
-
-    def create_cert(self):
-        self.pki.gen_cert()
+        else:
+            self.pki.gen_cert(self.name)
 
 
 class CA(Cert):

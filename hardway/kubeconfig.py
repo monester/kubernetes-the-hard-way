@@ -54,7 +54,7 @@ class KubeConfig:
 
 
 class KubeConfigs:
-    def __init__(self, workdir):
+    def __init__(self, workdir, names):
         self.workdir = workdir
         self.kubeconfigs = {}
         self.load()
