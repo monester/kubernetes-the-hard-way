@@ -25,9 +25,6 @@ def main():
 
     pki = PKI(workdir)
 
-    # generate ca
-    pki.init_ca()
-
     # generate admin user
     pki.gen_cert('admin', o='system:masters', ou='Kubernetes Admin')
 

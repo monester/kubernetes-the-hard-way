@@ -1,20 +1,24 @@
 import os
+import sys
+import json
+from subprocess import check_output, Popen, PIPE
 
 PKI_CONFIG = {
     "signing": {
-        "default": {"expiry":"8760h"},
+        "default": {"expiry": "8760h"},
         "profiles": {"kubernetes": {
-            "usages": ["signing", "key encipherment", "server auth", "client auth"], "expiry":"8760h"
+            "usages": ["signing", "key encipherment", "server auth", "client auth"], "expiry": "8760h"
         }}
     }
 }
 
 
 class Cert:
-    def __init__(self, name, cert_path, key_path, cert=None, key=None, **kwargs):
+    def __init__(self, workdir, name, cert=None, key=None, **kwargs):
         self.name = name
-        self.pem_path = cert_path
-        self.key_path = key_path
+
+        self.pem_path = cert_path = os.path.join(workdir, f'{name}.pem')
+        self.key_path = key_path = os.path.join(workdir, f'{name}-key.pem')
 
         if cert and key:
             open(cert_path, 'w').write(cert)
@@ -22,6 +26,7 @@ class Cert:
         else:
             cert = open(cert_path).read(cert)
             key = open(key_path).read(key)
+            print(f'Loading existing key from {cert_path} and {key_path}')
 
         self.pem = cert
         self.key = key
@@ -30,11 +35,15 @@ class Cert:
 class PKI:
     def __init__(self, workdir):
         self.workdir = workdir
-        self.ca = []
 
         self.config_path = os.path.join(workdir, "ca-config.json")
         self.certs = {}
         self.gen_config()
+
+        if os.path.exists(f'{workdir}/ca.pem'):
+            self.ca = Cert(workdir, 'ca')
+        else:
+            self.ca = self.gen_ca()
 
     def gen_config(self):
         """Create default settings for cfssl"""
@@ -42,9 +51,18 @@ class PKI:
             os.mkdir(self.workdir)
         json.dump(PKI_CONFIG, open(self.config_path, 'w'), indent=4)
 
-    def gencsr(self, cert_name, cn=None, o=None, ou=None):
+    def gen_ca(self):
+        csr = self.gencsr(cn='Kubernetes')
+        command = ['cfssl', 'gencert', '-initca', '-']
+        process = Popen(command, stdin=PIPE, stdout=PIPE, stderr=PIPE, cwd=self.workdir)
+        output, err = process.communicate(csr.encode('utf-8'))
+        cert = Cert(workdir=self.workdir, name='ca', **json.loads(output))
+        return cert
+
+    @staticmethod
+    def gencsr(cn=None, o=None, ou=None):
         data = {
-            "key": {"algo": "rsa","size": 2048},
+            "key": {"algo": "rsa", "size": 2048},
             "names": [{
                 "C": "NL",
                 "L": "Amsterdam",
@@ -58,23 +76,18 @@ class PKI:
 
         return json.dumps(data, indent=4)
 
-    def get_cert(self, cert_name, command=None, csr=None, hostname=None, **kwargs):
-        if cert_name in self.certs:
-            return self.certs[cert_name]
+    def gen_cert(self, cert_name, csr=None, hostname=None, **kwargs):
+        csr = csr or self.gencsr(**kwargs)
 
-        csr = csr or self.gencsr(cert_name, **kwargs)
-        cert_path = os.path.join(self.workdir, f'{cert_name}.pem')
-        key_path = os.path.join(self.workdir, f'{cert_name}-key.pem')
-
-        if os.path.exists(cert_path) and os.path.exists(key_path):
-            print(f'{cert_path} and {cert_key} already exists. Loading existing key.')
-            cert = Cert(name=cert_name, cert_path=cert_path, key_path=key_path)
-
-        else:
-            if cert_name == 'ca':
-                command = ['cfssl', 'gencert', '-initca']
-            else:
-
+        try:
+            cert = Cert(workdir=self.workdir, name=cert_name)
+        except FileNotFoundError:
+            command = ['cfssl', 'gencert',
+                       f'-ca={self.ca.pem_path}',
+                       f'-ca-key={self.ca.key_path}',
+                       f'-config={self.config_path}',
+                       '-profile=kubernetes'
+                       ]
             if hostname:
                 command.append('-hostname=%s' % ','.join(hostname))
 
@@ -85,10 +98,14 @@ class PKI:
                 print(err, file=sys.stderr)
                 exit(1)
 
-            cert = Cert(name=cert_name, cert_path=cert_path, key_path=key_path, **json.loads(output))
+            cert = Cert(workdir=self.workdir, name=cert_name, **json.loads(output))
 
-        return self.certs[cert_name] = cert
+        self.certs[cert_name] = cert
+        return cert
 
-    @property
-    def ca(self):
-        return self.get_cert('ca')
+    def __getitem__(self, item):
+        try:
+            self.certs[item]
+        except KeyError:
+            self.certs[item] = self.gen_cert(item)
+            return self.certs[item]
